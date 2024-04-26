@@ -22,9 +22,9 @@ var (
 	HELP_Y_PADDING = 50
 	PAD_X          = 40
 
-	FONT_SIZE_HEADER = 20
-	FONT_SIZE_BODY   = 15
-	FONT_SIZE_HELP   = 15
+	FONT_SIZE_HEADER = 30
+	FONT_SIZE_BODY   = 25
+	FONT_SIZE_HELP   = 20
 
 	HEADERS = []string{"PRs", "Issues", "Alerts"}
 
@@ -128,6 +128,9 @@ func main() {
 	rl.SetTargetFPS(60)
 	rl.SetConfigFlags(rl.FlagWindowResizable)
 	rl.InitWindow(int32(WINDOW_WIDTH), int32(WINDOW_HEIGHT), "Daeshboard")
+	headerFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HEADER), nil, 256)
+	bodyFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_BODY), nil, 256)
+	helpFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HELP), nil, 256)
 	defer rl.CloseWindow()
 
 	for !rl.WindowShouldClose() {
@@ -136,10 +139,10 @@ func main() {
 
 		shouldClose := reactToInput(&state)
 
-		drawHeaders(state)
+		drawHeaders(state, headerFont, float32(FONT_SIZE_HEADER))
 		drawRuler()
-		drawBody(state)
-		drawHelp()
+		drawBody(state, bodyFont, float32(FONT_SIZE_BODY))
+		drawHelp(helpFont, float32(FONT_SIZE_HELP))
 
 		rl.EndDrawing()
 		if shouldClose {
@@ -331,7 +334,7 @@ func openApplication(state State) {
 	}
 }
 
-func drawHeaders(state State) {
+func drawHeaders(state State, font rl.Font, fontSize float32) {
 	rects := getHeaderRects(len(HEADERS))
 	selectedHeaderIndex := slices.Index(HEADERS, state.SelectedHeader)
 	for i, rect := range rects {
@@ -343,7 +346,7 @@ func drawHeaders(state State) {
 		text := fmt.Sprintf("%s [%d]", header, nItems)
 		textWidth := rl.MeasureText(text, int32(FONT_SIZE_HEADER))
 		padX := (rect.Width - float32(textWidth)) / 2
-		rl.DrawText(text, rect.ToInt32().X+int32(padX), rect.ToInt32().Y, int32(FONT_SIZE_HEADER), COLOR_HEADER)
+		rl.DrawTextEx(font, text, rl.NewVector2(rect.X+padX, rect.Y), fontSize, 0, COLOR_HEADER)
 	}
 }
 
@@ -352,7 +355,7 @@ func drawRuler() {
 	rl.DrawRectangle(0, int32(RULER_Y), int32(width), 1, COLOR_RULER)
 }
 
-func drawBody(state State) {
+func drawBody(state State, font rl.Font, fontSize float32) {
 	data := state.Data[state.SelectedHeader]
 	for i, d := range data {
 		y := BODY_Y + i*(FONT_SIZE_BODY+5)
@@ -362,18 +365,18 @@ func drawBody(state State) {
 			rect := rl.NewRectangle(float32(PAD_X)-padding, float32(y), float32(textWidth)+2*padding, float32(FONT_SIZE_BODY))
 			rl.DrawRectangleRounded(rect, 1, 1, COLOR_SELECTED_ITEM)
 		}
-		rl.DrawText(d.Value, int32(PAD_X), int32(y), int32(FONT_SIZE_BODY), COLOR_ITEM)
+		rl.DrawTextEx(font, d.Value, rl.NewVector2(float32(PAD_X), float32(y)), fontSize, 0, COLOR_ITEM)
 	}
 }
 
-func drawHelp() {
+func drawHelp(font rl.Font, fontSize float32) {
 	text := fmt.Sprintf(`<hjkl, wasd, arrows, 1..%d> MOVE    <enter, space> OPEN    <q> QUIT`, len(HEADERS))
 	textWidth := rl.MeasureText(text, int32(FONT_SIZE_HELP))
 	x := (rl.GetScreenWidth() - int(textWidth)) / 2
 	y := rl.GetScreenHeight() - HELP_Y_PADDING
 	rect := rl.NewRectangle(float32(x), float32(y), float32(textWidth), float32(FONT_SIZE_HELP))
 	rl.DrawRectangleRounded(rect, 1, 1, COLOR_PINK_BG)
-	rl.DrawText(text, int32(x), int32(y), int32(FONT_SIZE_HELP), COLOR_HELP)
+	rl.DrawTextEx(font, text, rl.NewVector2(float32(x), float32(y)), fontSize, 0, COLOR_HELP)
 }
 
 func getHeaderRects(nHeaders int) []rl.Rectangle {
