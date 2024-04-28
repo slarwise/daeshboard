@@ -136,6 +136,7 @@ func main() {
 	helpFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HELP), nil, 256)
 	defer rl.CloseWindow()
 
+	// Hack to not give a notification at startup
 	latestInput := time.Now().Add(5 * time.Second)
 	latestModifiedAt := time.Now()
 	for !rl.WindowShouldClose() {
@@ -190,7 +191,11 @@ func updateData(state *State, config Config) {
 			fmt.Fprintf(os.Stderr, "Failed to get pull requests: %s\n", err.Error())
 			os.Exit(1)
 		}
+		// TODO: Getting new alerts and issues every now and then,
+		//       probably good to sort all items to be able to
+		//       compare them
 		if !slices.Equal(prs, state.Data["PRs"].Items) {
+			fmt.Println("New PR!")
 			state.Data["PRs"] = HeaderData{
 				Items:      prs,
 				ModifiedAt: time.Now(),
@@ -202,6 +207,7 @@ func updateData(state *State, config Config) {
 			os.Exit(1)
 		}
 		if !slices.Equal(issues, state.Data["Issues"].Items) {
+			fmt.Println("New issue!")
 			state.Data["Issues"] = HeaderData{
 				Items:      issues,
 				ModifiedAt: time.Now(),
@@ -213,6 +219,7 @@ func updateData(state *State, config Config) {
 			os.Exit(1)
 		}
 		if !slices.Equal(alerts, state.Data["Alerts"].Items) {
+			fmt.Println("New alert!")
 			state.Data["Alerts"] = HeaderData{
 				Items:      alerts,
 				ModifiedAt: time.Now(),
