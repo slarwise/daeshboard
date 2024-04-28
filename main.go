@@ -94,18 +94,21 @@ func buildConfig(filename string) (Config, error) {
 type State struct {
 	SelectedHeader string
 	SelectedItem   int
-	Data           map[string][]Item
+	Data           map[string]HeaderData
 }
 
 func NewState() State {
 	return State{
 		SelectedHeader: HEADERS[0],
 		SelectedItem:   0,
-		Data:           make(map[string][]Item),
+		Data:           make(map[string]HeaderData),
 	}
 }
 
-type Data map[string][]Item
+type HeaderData struct {
+	Items      []Item
+	ModifiedAt time.Time
+}
 
 type Item struct {
 	Value       string
@@ -133,11 +136,27 @@ func main() {
 	helpFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HELP), nil, 256)
 	defer rl.CloseWindow()
 
+	latestInput := time.Now()
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.RayWhite)
 
-		shouldClose := reactToInput(&state)
+		shouldClose, gotInput := reactToInput(&state)
+		if gotInput {
+			latestInput = time.Now()
+		}
+
+		userIsAware := true
+		for _, headerData := range state.Data {
+			if latestInput.Before(headerData.ModifiedAt) {
+				userIsAware = false
+			}
+		}
+		if userIsAware {
+			rl.SetWindowTitle("Daeshboard")
+		} else {
+			rl.SetWindowTitle("● Daeshboard")
+		}
 
 		drawHeaders(state, headerFont, float32(FONT_SIZE_HEADER))
 		drawRuler()
@@ -159,19 +178,34 @@ func updateData(state *State, config Config) {
 			fmt.Fprintf(os.Stderr, "Failed to get pull requests: %s\n", err.Error())
 			os.Exit(1)
 		}
-		state.Data["PRs"] = prs
+		if !slices.Equal(prs, state.Data["PRs"].Items) {
+			state.Data["PRs"] = HeaderData{
+				Items:      prs,
+				ModifiedAt: time.Now(),
+			}
+		}
 		issues, err := getIssues(config.Repos, config.GithubToken)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to get issues: %s\n", err.Error())
 			os.Exit(1)
 		}
-		state.Data["Issues"] = issues
+		if !slices.Equal(issues, state.Data["Issues"].Items) {
+			state.Data["Issues"] = HeaderData{
+				Items:      issues,
+				ModifiedAt: time.Now(),
+			}
+		}
 		alerts, err := getAlerts(config.Alerts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to get alerts: %s\n", err.Error())
 			os.Exit(1)
 		}
-		state.Data["Alerts"] = alerts
+		if !slices.Equal(alerts, state.Data["Alerts"].Items) {
+			state.Data["Alerts"] = HeaderData{
+				Items:      alerts,
+				ModifiedAt: time.Now(),
+			}
+		}
 		time.Sleep(10 * time.Second)
 	}
 }
@@ -284,9 +318,10 @@ func getAlerts(alertsConfig AlertsConfig) ([]Item, error) {
 	return alerts, nil
 }
 
-func reactToInput(state *State) bool {
+func reactToInput(state *State) (bool, bool) {
 	shouldClose := false
-	nItems := len(state.Data[state.SelectedHeader])
+	gotInput := true
+	nItems := len(state.Data[state.SelectedHeader].Items)
 	switch rl.GetKeyPressed() {
 	case rl.KeyLeft, rl.KeyA, rl.KeyH:
 		index := slices.Index(HEADERS, state.SelectedHeader)
@@ -316,16 +351,18 @@ func reactToInput(state *State) bool {
 		state.SelectedHeader = HEADERS[2]
 	case rl.KeyQ:
 		shouldClose = true
+	default:
+		gotInput = false
 	}
-	return shouldClose
+	return shouldClose, gotInput
 }
 
 func openApplication(state State) {
 	// TODO: Default app or url to open when there are no items?
-	if len(state.Data[state.SelectedHeader]) == 0 {
+	if len(state.Data[state.SelectedHeader].Items) == 0 {
 		return
 	}
-	item := state.Data[state.SelectedHeader][state.SelectedItem]
+	item := state.Data[state.SelectedHeader].Items[state.SelectedItem]
 	if item.Application != "" {
 		cmd := exec.Command("open", "-a", item.Application)
 		cmd.Run()
@@ -342,7 +379,7 @@ func drawHeaders(state State, font rl.Font, fontSize float32) {
 			rl.DrawRectangleRounded(rect, 1, 1, COLOR_SELECTED_HEADER)
 		}
 		header := HEADERS[i]
-		nItems := len(state.Data[header])
+		nItems := len(state.Data[header].Items)
 		text := fmt.Sprintf("%s [%d]", header, nItems)
 		textWidth := rl.MeasureText(text, int32(FONT_SIZE_HEADER))
 		padX := (rect.Width - float32(textWidth)) / 2
@@ -357,7 +394,7 @@ func drawRuler() {
 
 func drawBody(state State, font rl.Font, fontSize float32) {
 	data := state.Data[state.SelectedHeader]
-	for i, d := range data {
+	for i, d := range data.Items {
 		y := BODY_Y + i*(FONT_SIZE_BODY+5)
 		if i == state.SelectedItem {
 			textWidth := rl.MeasureText(d.Value, int32(FONT_SIZE_BODY))
