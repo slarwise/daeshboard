@@ -136,7 +136,8 @@ func main() {
 	helpFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HELP), nil, 256)
 	defer rl.CloseWindow()
 
-	latestInput := time.Now()
+	latestInput := time.Now().Add(5 * time.Second)
+	latestModifiedAt := time.Now()
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.RayWhite)
@@ -147,15 +148,26 @@ func main() {
 		}
 
 		userIsAware := true
+		sendNotification := false
 		for _, headerData := range state.Data {
 			if latestInput.Before(headerData.ModifiedAt) {
 				userIsAware = false
+				if latestModifiedAt.Before(headerData.ModifiedAt) {
+					sendNotification = true
+					latestModifiedAt = headerData.ModifiedAt
+				}
 			}
 		}
 		if userIsAware {
 			rl.SetWindowTitle("Daeshboard")
 		} else {
 			rl.SetWindowTitle("● Daeshboard")
+		}
+		if sendNotification {
+			if err := Notify(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to create notification: %s\n", err.Error())
+				os.Exit(1)
+			}
 		}
 
 		drawHeaders(state, headerFont, float32(FONT_SIZE_HEADER))
@@ -385,6 +397,17 @@ func drawHeaders(state State, font rl.Font, fontSize float32) {
 		padX := (rect.Width - float32(textWidth)) / 2
 		rl.DrawTextEx(font, text, rl.NewVector2(rect.X+padX, rect.Y), fontSize, 0, COLOR_HEADER)
 	}
+}
+
+func Notify() error {
+	osa, err := exec.LookPath("osascript")
+	if err != nil {
+		return err
+	}
+
+	script := fmt.Sprintf("display notification %q with title %q", "Something happened", "Daeshboard")
+	cmd := exec.Command(osa, "-e", script)
+	return cmd.Run()
 }
 
 func drawRuler() {
