@@ -95,6 +95,7 @@ type State struct {
 	SelectedHeader string
 	SelectedItem   int
 	Data           map[string]HeaderData
+	HasUnread      map[string]bool
 }
 
 func NewState() State {
@@ -102,6 +103,7 @@ func NewState() State {
 		SelectedHeader: HEADERS[0],
 		SelectedItem:   0,
 		Data:           make(map[string]HeaderData),
+		HasUnread:      make(map[string]bool),
 	}
 }
 
@@ -138,7 +140,8 @@ func main() {
 	defer rl.CloseWindow()
 
 	// Hack to not give a notification at startup
-	latestInput := time.Now().Add(10 * time.Second)
+	latestInputAt := time.Now().Add(10 * time.Second)
+	// latestInputAt := time.Now()
 	latestModifiedAt := time.Now()
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
@@ -146,18 +149,29 @@ func main() {
 
 		shouldClose, gotInput := reactToInput(&state)
 		if gotInput {
-			latestInput = time.Now()
+			latestInputAt = time.Now()
 		}
 
 		sendNotification := false
-		newWindowTitle := "Daeshboard"
-		for _, headerData := range state.Data {
-			if latestInput.Before(headerData.ModifiedAt) {
-				newWindowTitle = "● Daeshboard"
+		for header, headerData := range state.Data {
+			if latestInputAt.Before(headerData.ModifiedAt) {
+				state.HasUnread[header] = true
 				if latestModifiedAt.Before(headerData.ModifiedAt) {
 					sendNotification = true
 					latestModifiedAt = headerData.ModifiedAt
 				}
+			} else {
+				if state.SelectedHeader == header {
+					state.HasUnread[header] = false
+				}
+			}
+		}
+
+		newWindowTitle := "Daeshboard"
+		for _, hasUnread := range state.HasUnread {
+			if hasUnread {
+				newWindowTitle = "● Daeshboard"
+				break
 			}
 		}
 		if newWindowTitle != windowTitle {
@@ -414,7 +428,11 @@ func drawHeaders(state State, font rl.Font, fontSize float32) {
 		}
 		header := HEADERS[i]
 		nItems := len(state.Data[header].Items)
-		text := fmt.Sprintf("%s [%d]", header, nItems)
+		notice := ""
+		if state.HasUnread[header] {
+			notice = "*"
+		}
+		text := fmt.Sprintf("%s%s [%d]", notice, header, nItems)
 		textWidth := rl.MeasureText(text, int32(FONT_SIZE_HEADER))
 		padX := (rect.Width - float32(textWidth)) / 2
 		rl.DrawTextEx(font, text, rl.NewVector2(rect.X+padX, rect.Y), fontSize, 0, COLOR_HEADER)
