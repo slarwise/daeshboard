@@ -261,7 +261,7 @@ func getAlerts(alertsConfig AlertsConfig) ([]Item, error) {
 			Description string `json:"description"`
 		} `json:"annotations"`
 	}
-	query := fmt.Sprintf("receiver=%s&silenced=false&inhibited=true", url.QueryEscape(alertsConfig.Receiver))
+	query := fmt.Sprintf("receiver=%s&silenced=false&inhibited=false", url.QueryEscape(alertsConfig.Receiver))
 	url := fmt.Sprintf("%s/api/v2/alerts?%s", alertsConfig.Server, query)
 	resp, err := http.Get(url)
 	if err != nil {
