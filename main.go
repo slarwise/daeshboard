@@ -191,9 +191,6 @@ func updateData(state *State, config Config) {
 			fmt.Fprintf(os.Stderr, "Failed to get pull requests: %s\n", err.Error())
 			os.Exit(1)
 		}
-		// TODO: Getting new alerts and issues every now and then,
-		//       probably good to sort all items to be able to
-		//       compare them
 		if !slices.Equal(prs, state.Data["PRs"].Items) {
 			fmt.Println("New PR!")
 			state.Data["PRs"] = HeaderData{
