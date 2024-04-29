@@ -130,7 +130,8 @@ func main() {
 	}
 	rl.SetTargetFPS(60)
 	rl.SetConfigFlags(rl.FlagWindowResizable)
-	rl.InitWindow(int32(WINDOW_WIDTH), int32(WINDOW_HEIGHT), "Daeshboard")
+	windowTitle := "Daeshboard"
+	rl.InitWindow(int32(WINDOW_WIDTH), int32(WINDOW_HEIGHT), windowTitle)
 	headerFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HEADER), nil, 256)
 	bodyFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_BODY), nil, 256)
 	helpFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HELP), nil, 256)
@@ -148,21 +149,20 @@ func main() {
 			latestInput = time.Now()
 		}
 
-		userIsAware := true
 		sendNotification := false
+		newWindowTitle := "Daeshboard"
 		for _, headerData := range state.Data {
 			if latestInput.Before(headerData.ModifiedAt) {
-				userIsAware = false
+				newWindowTitle = "● Daeshboard"
 				if latestModifiedAt.Before(headerData.ModifiedAt) {
 					sendNotification = true
 					latestModifiedAt = headerData.ModifiedAt
 				}
 			}
 		}
-		if userIsAware {
-			rl.SetWindowTitle("Daeshboard")
-		} else {
-			rl.SetWindowTitle("● Daeshboard")
+		if newWindowTitle != windowTitle {
+			rl.SetWindowTitle(newWindowTitle)
+			windowTitle = newWindowTitle
 		}
 		if sendNotification {
 			if err := Notify(); err != nil {
