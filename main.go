@@ -138,7 +138,7 @@ func main() {
 	defer rl.CloseWindow()
 
 	// Hack to not give a notification at startup
-	latestInput := time.Now().Add(5 * time.Second)
+	latestInput := time.Now().Add(10 * time.Second)
 	latestModifiedAt := time.Now()
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
