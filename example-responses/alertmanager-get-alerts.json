@@ -1,0 +1,29 @@
+[
+  {
+    "annotations": {
+      "additionalProp1": "string",
+      "additionalProp2": "string",
+      "additionalProp3": "string"
+    },
+    "receivers": [
+      {
+        "name": "string"
+      }
+    ],
+    "fingerprint": "string",
+    "startsAt": "2024-04-29T19:46:54.815Z",
+    "updatedAt": "2024-04-29T19:46:54.815Z",
+    "endsAt": "2024-04-29T19:46:54.815Z",
+    "status": {
+      "state": "unprocessed",
+      "silencedBy": ["string"],
+      "inhibitedBy": ["string"]
+    },
+    "labels": {
+      "additionalProp1": "string",
+      "additionalProp2": "string",
+      "additionalProp3": "string"
+    },
+    "generatorURL": "string"
+  }
+]
