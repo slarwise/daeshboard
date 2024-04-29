@@ -229,12 +229,15 @@ func updateData(state *State, config Config) {
 	}
 }
 
+type PR struct {
+	Title     string    `json:"title"`
+	HtmlURL   string    `json:"html_url"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func getPrs(repos []Repo, token string) ([]Item, error) {
-	var prs []Item
-	var body []struct {
-		Title   string `json:"title"`
-		HtmlURL string `json:"html_url"`
-	}
+	var items []Item
+	var prs []PR
 	for _, r := range repos {
 		url := fmt.Sprintf("https://api.github.com/repos/%s/pulls", r)
 		req, err := http.NewRequest("GET", url, nil)
@@ -252,28 +255,34 @@ func getPrs(repos []Repo, token string) ([]Item, error) {
 		if resp.StatusCode != 200 {
 			return []Item{}, fmt.Errorf("Got non-200 status code when getting pull request for repo %s: %s\n", r, resp.Status)
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&prs); err != nil {
 			return []Item{}, fmt.Errorf("Could not parse pull request response for repo %s: %s", r, err.Error())
 		}
-		for _, pr := range body {
-			prs = append(prs, Item{
+		slices.SortFunc(prs, func(a, b PR) int {
+			return -1 * a.CreatedAt.Compare(b.CreatedAt)
+		})
+		for _, pr := range prs {
+			items = append(items, Item{
 				Value: fmt.Sprintf("%s: %s", r, pr.Title),
 				URL:   pr.HtmlURL,
 			})
 		}
 	}
-	return prs, nil
+	return items, nil
+}
+
+type Issue struct {
+	Title       string `json:"title"`
+	HtmlURL     string `json:"html_url"`
+	PullRequest struct {
+		URL string `json:"url"`
+	} `json:"pull_request"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func getIssues(repos []Repo, token string) ([]Item, error) {
-	var issues []Item
-	var body []struct {
-		Title       string `json:"title"`
-		HtmlURL     string `json:"html_url"`
-		PullRequest struct {
-			URL string `json:"url"`
-		} `json:"pull_request"`
-	}
+	var items []Item
+	var issues []Issue
 	for _, r := range repos {
 		url := fmt.Sprintf("https://api.github.com/repos/%s/issues", r)
 		req, err := http.NewRequest("GET", url, nil)
@@ -291,29 +300,35 @@ func getIssues(repos []Repo, token string) ([]Item, error) {
 		if resp.StatusCode != 200 {
 			return []Item{}, fmt.Errorf("Got non-200 status code when getting issues for repo %s: %s\n", r, resp.Status)
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
 			return []Item{}, fmt.Errorf("Could not parse issue response for repo %s: %s", r, err.Error())
 		}
-		for _, issue := range body {
+		slices.SortFunc(issues, func(a, b Issue) int {
+			return -1 * a.CreatedAt.Compare(b.CreatedAt)
+		})
+		for _, issue := range issues {
 			// The issues endpoint returns pull requests as well, see
 			// https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
 			if issue.PullRequest.URL == "" {
-				issues = append(issues, Item{
+				items = append(items, Item{
 					Value: fmt.Sprintf("%s: %s", r, issue.Title),
 					URL:   issue.HtmlURL,
 				})
 			}
 		}
 	}
-	return issues, nil
+	return items, nil
+}
+
+type Alert struct {
+	Annotations struct {
+		Description string `json:"description"`
+	} `json:"annotations"`
+	StartsAt time.Time `json:"startsAt"`
 }
 
 func getAlerts(alertsConfig AlertsConfig) ([]Item, error) {
-	var body []struct {
-		Annotations struct {
-			Description string `json:"description"`
-		} `json:"annotations"`
-	}
+	var alerts []Alert
 	query := fmt.Sprintf("receiver=%s&silenced=false&inhibited=false", url.QueryEscape(alertsConfig.Receiver))
 	url := fmt.Sprintf("%s/api/v2/alerts?%s", alertsConfig.Server, query)
 	resp, err := http.Get(url)
@@ -324,17 +339,20 @@ func getAlerts(alertsConfig AlertsConfig) ([]Item, error) {
 	if resp.StatusCode != 200 {
 		return []Item{}, fmt.Errorf("Got non-200 status code when getting alerts: %s\n", resp.Status)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&alerts); err != nil {
 		return []Item{}, fmt.Errorf("Could not parse alerts response: %s", err.Error())
 	}
-	var alerts []Item
-	for _, a := range body {
-		alerts = append(alerts, Item{
+	slices.SortFunc(alerts, func(a, b Alert) int {
+		return -1 * a.StartsAt.Compare(b.StartsAt)
+	})
+	var items []Item
+	for _, a := range alerts {
+		items = append(items, Item{
 			Value: a.Annotations.Description,
 			URL:   fmt.Sprintf("%s/#/alerts?%s", alertsConfig.Server, query),
 		})
 	}
-	return alerts, nil
+	return items, nil
 }
 
 func reactToInput(state *State) (bool, bool) {
