@@ -92,18 +92,33 @@ func buildConfig(filename string) (Config, error) {
 }
 
 type State struct {
-	SelectedHeader string
-	SelectedItem   int
-	Data           map[string]HeaderData
-	HasUnread      map[string]bool
+	SelectedTab int
+	Tabs        []Tab
+	Data        map[string]HeaderData
+	ShouldClose bool
+}
+
+type Tab struct {
+	Title        string
+	SelectedItem int
+	LastViewedAt time.Time
+}
+
+type TabState struct {
+	Selected     bool
+	SelectedItem int
+	Unread       bool
 }
 
 func NewState() State {
+	tabs := []Tab{
+		{Title: "PRs"},
+		{Title: "Issues"},
+		{Title: "Alerts"},
+	}
 	return State{
-		SelectedHeader: HEADERS[0],
-		SelectedItem:   0,
-		Data:           make(map[string]HeaderData),
-		HasUnread:      make(map[string]bool),
+		Data: make(map[string]HeaderData),
+		Tabs: tabs,
 	}
 }
 
@@ -139,61 +154,33 @@ func main() {
 	helpFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HELP), nil, 256)
 	defer rl.CloseWindow()
 
-	// Hack to not give a notification at startup
-	latestInputAt := time.Now().Add(10 * time.Second)
-	// latestInputAt := time.Now()
-	latestModifiedAt := time.Now()
-	for !rl.WindowShouldClose() {
+	lastModifiedAt := map[string]time.Time{
+		"PRs":    time.Now(),
+		"Issues": time.Now(),
+		"Alerts": time.Now(),
+	}
+	for !rl.WindowShouldClose() && !state.ShouldClose {
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.RayWhite)
+		// Read the input and update the state
+		// Draw stuff based on the state
 
-		shouldClose, gotInput := reactToInput(&state)
-		if gotInput {
-			latestInputAt = time.Now()
-		}
+		// Notifications:
+		//     Show in the window title if any of the tabs was last viewed before its data was modified
+		//     Show in the tab titles if the tab was last viewed before its data was modified
+		//     Send a notification whenever any of the data's last modified at was updated
 
-		sendNotification := false
-		for header, headerData := range state.Data {
-			if latestInputAt.Before(headerData.ModifiedAt) {
-				state.HasUnread[header] = true
-				if latestModifiedAt.Before(headerData.ModifiedAt) {
-					sendNotification = true
-					latestModifiedAt = headerData.ModifiedAt
-				}
-			} else {
-				if state.SelectedHeader == header {
-					state.HasUnread[header] = false
-				}
-			}
-		}
+		reactToInput(&state)
 
-		newWindowTitle := "Daeshboard"
-		for _, hasUnread := range state.HasUnread {
-			if hasUnread {
-				newWindowTitle = "● Daeshboard"
-				break
-			}
-		}
-		if newWindowTitle != windowTitle {
-			rl.SetWindowTitle(newWindowTitle)
-			windowTitle = newWindowTitle
-		}
-		if sendNotification {
-			if err := Notify(); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to create notification: %s\n", err.Error())
-				os.Exit(1)
-			}
-		}
-
+		drawWindowTitle(&state)
 		drawHeaders(state, headerFont, float32(FONT_SIZE_HEADER))
 		drawRuler()
 		drawBody(state, bodyFont, float32(FONT_SIZE_BODY))
 		drawHelp(helpFont, float32(FONT_SIZE_HELP))
 
+		notifyIfNeeded(&state, lastModifiedAt)
+
 		rl.EndDrawing()
-		if shouldClose {
-			break
-		}
 	}
 }
 
@@ -366,51 +353,48 @@ func getAlerts(alertsConfig AlertsConfig) ([]Item, error) {
 	return items, nil
 }
 
-func reactToInput(state *State) (bool, bool) {
-	shouldClose := false
+func reactToInput(state *State) {
 	gotInput := true
-	nItems := len(state.Data[state.SelectedHeader].Items)
+	nItems := len(state.Data[state.Tabs[state.SelectedTab].Title].Items)
 	switch rl.GetKeyPressed() {
 	case rl.KeyLeft, rl.KeyA, rl.KeyH:
-		index := slices.Index(HEADERS, state.SelectedHeader)
-		newIndex := max(0, index-1)
-		if newIndex != index {
-			state.SelectedHeader = HEADERS[newIndex]
-			state.SelectedItem = 0
+		newSelectedTab := max(0, state.SelectedTab-1)
+		if newSelectedTab != state.SelectedTab {
+			state.SelectedTab = newSelectedTab
 		}
 	case rl.KeyRight, rl.KeyD, rl.KeyL:
-		index := slices.Index(HEADERS, state.SelectedHeader)
-		newIndex := min(len(HEADERS)-1, index+1)
-		if newIndex != index {
-			state.SelectedHeader = HEADERS[newIndex]
-			state.SelectedItem = 0
+		newSelectedTab := min(len(state.Tabs)-1, state.SelectedTab+1)
+		if newSelectedTab != state.SelectedTab {
+			state.SelectedTab = newSelectedTab
 		}
 	case rl.KeyUp, rl.KeyW, rl.KeyK:
-		state.SelectedItem = max(0, state.SelectedItem-1)
+		state.Tabs[state.SelectedTab].SelectedItem = max(0, state.Tabs[state.SelectedTab].SelectedItem-1)
 	case rl.KeyDown, rl.KeyS, rl.KeyJ:
-		state.SelectedItem = min(nItems-1, state.SelectedItem+1)
+		state.Tabs[state.SelectedTab].SelectedItem = min(nItems-1, state.Tabs[state.SelectedTab].SelectedItem+1)
 	case rl.KeyEnter, rl.KeySpace:
 		openApplication(*state)
 	case rl.KeyOne:
-		state.SelectedHeader = HEADERS[0]
+		state.SelectedTab = 0
 	case rl.KeyTwo:
-		state.SelectedHeader = HEADERS[1]
+		state.SelectedTab = 1
 	case rl.KeyThree:
-		state.SelectedHeader = HEADERS[2]
+		state.SelectedTab = 2
 	case rl.KeyQ:
-		shouldClose = true
+		state.ShouldClose = true
 	default:
 		gotInput = false
 	}
-	return shouldClose, gotInput
+	if gotInput {
+		state.Tabs[state.SelectedTab].LastViewedAt = time.Now()
+	}
 }
 
 func openApplication(state State) {
 	// TODO: Default app or url to open when there are no items?
-	if len(state.Data[state.SelectedHeader].Items) == 0 {
+	if len(state.Data[state.Tabs[state.SelectedTab].Title].Items) == 0 {
 		return
 	}
-	item := state.Data[state.SelectedHeader].Items[state.SelectedItem]
+	item := state.Data[state.Tabs[state.SelectedTab].Title].Items[state.Tabs[state.SelectedTab].SelectedItem]
 	if item.Application != "" {
 		cmd := exec.Command("open", "-a", item.Application)
 		cmd.Run()
@@ -419,24 +403,47 @@ func openApplication(state State) {
 	}
 }
 
+func drawWindowTitle(state *State) {
+	for _, t := range state.Tabs {
+		if t.LastViewedAt.Before(state.Data[t.Title].ModifiedAt) {
+			rl.SetWindowTitle("● Daeshboard")
+			return
+		}
+	}
+	rl.SetWindowTitle("Daeshboard")
+}
+
 func drawHeaders(state State, font rl.Font, fontSize float32) {
 	rects := getHeaderRects(len(HEADERS))
-	selectedHeaderIndex := slices.Index(HEADERS, state.SelectedHeader)
-	for i, rect := range rects {
-		if i == selectedHeaderIndex {
-			rl.DrawRectangleRounded(rect, 1, 1, COLOR_SELECTED_HEADER)
+	for i, tab := range state.Tabs {
+		if i == state.SelectedTab {
+			rl.DrawRectangleRounded(rects[i], 1, 1, COLOR_SELECTED_HEADER)
 		}
-		header := HEADERS[i]
-		nItems := len(state.Data[header].Items)
+		nItems := len(state.Data[tab.Title].Items)
 		notice := ""
-		if state.HasUnread[header] {
+
+		if tab.LastViewedAt.Before(state.Data[tab.Title].ModifiedAt) {
 			notice = "*"
 		}
-		text := fmt.Sprintf("%s%s [%d]", notice, header, nItems)
+		text := fmt.Sprintf("%s%s [%d]", notice, tab.Title, nItems)
 		textWidth := rl.MeasureText(text, int32(FONT_SIZE_HEADER))
-		padX := (rect.Width - float32(textWidth)) / 2
-		rl.DrawTextEx(font, text, rl.NewVector2(rect.X+padX, rect.Y), fontSize, 0, COLOR_HEADER)
+		padX := (rects[i].Width - float32(textWidth)) / 2
+		rl.DrawTextEx(font, text, rl.NewVector2(rects[i].X+padX, rects[i].Y), fontSize, 0, COLOR_HEADER)
 	}
+}
+
+func notifyIfNeeded(state *State, lastModifiedAt map[string]time.Time) {
+	// Send a notification whenever any of the data's last modified at was updated
+	for key, t := range lastModifiedAt {
+		if t.Before(state.Data[key].ModifiedAt) {
+			lastModifiedAt[key] = state.Data[key].ModifiedAt
+			if err := Notify(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to create notification: %s\n", err.Error())
+				os.Exit(1)
+			}
+		}
+	}
+
 }
 
 func Notify() error {
@@ -456,10 +463,11 @@ func drawRuler() {
 }
 
 func drawBody(state State, font rl.Font, fontSize float32) {
-	data := state.Data[state.SelectedHeader]
+	selectedTab := state.Tabs[state.SelectedTab]
+	data := state.Data[selectedTab.Title]
 	for i, d := range data.Items {
 		y := BODY_Y + i*(FONT_SIZE_BODY+5)
-		if i == state.SelectedItem {
+		if i == selectedTab.SelectedItem {
 			textWidth := rl.MeasureText(d.Value, int32(FONT_SIZE_BODY))
 			padding := float32(10)
 			rect := rl.NewRectangle(float32(PAD_X)-padding, float32(y), float32(textWidth)+2*padding, float32(FONT_SIZE_BODY))
