@@ -39,6 +39,8 @@ var (
 	COLOR_RULER           = COLOR_GRAY
 	COLOR_ITEM            = COLOR_BLACK
 	COLOR_HELP            = COLOR_BLACK
+
+	PROGRAM_NAME = "Daeshboard"
 )
 
 type Config struct {
@@ -148,7 +150,7 @@ func main() {
 	}
 	rl.SetTargetFPS(60)
 	rl.SetConfigFlags(rl.FlagWindowResizable)
-	windowTitle := "Daeshboard"
+	windowTitle := PROGRAM_NAME
 	rl.InitWindow(int32(WINDOW_WIDTH), int32(WINDOW_HEIGHT), windowTitle)
 	headerFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HEADER), nil, 256)
 	bodyFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_BODY), nil, 256)
@@ -395,11 +397,11 @@ func openApplication(state State) {
 func drawWindowTitle(state *State) {
 	for _, t := range state.Tabs {
 		if t.LastViewedAt.Before(state.Data[t.Title].ModifiedAt) {
-			rl.SetWindowTitle("● Daeshboard")
+			rl.SetWindowTitle(fmt.Sprintf("● %s", PROGRAM_NAME))
 			return
 		}
 	}
-	rl.SetWindowTitle("Daeshboard")
+	rl.SetWindowTitle(PROGRAM_NAME)
 }
 
 func drawHeaders(state State, font rl.Font, fontSize float32) {
@@ -450,7 +452,7 @@ func Notify(tab string) error {
 	}
 
 	msg := fmt.Sprintf("Something %s happend, lol?", tab)
-	script := fmt.Sprintf("display notification %q with title %q", msg, "Daeshboard")
+	script := fmt.Sprintf("display notification %q with title %q", msg, PROGRAM_NAME)
 	cmd := exec.Command(osa, "-e", script)
 	return cmd.Run()
 }
