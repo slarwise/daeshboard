@@ -39,6 +39,8 @@ var (
 	COLOR_RULER           = COLOR_GRAY
 	COLOR_ITEM            = COLOR_BLACK
 	COLOR_HELP            = COLOR_BLACK
+
+	PROGRAM_NAME = "Daeshboard"
 )
 
 type Config struct {
@@ -92,20 +94,41 @@ func buildConfig(filename string) (Config, error) {
 }
 
 type State struct {
-	SelectedHeader string
-	SelectedItem   int
-	Data           map[string][]Item
+	SelectedTab        int
+	Tabs               []Tab
+	Data               map[string]HeaderData
+	ShouldClose        bool
+	NotificationSentAt map[string]time.Time
+}
+
+type Tab struct {
+	Title        string
+	SelectedItem int
+	LastViewedAt time.Time
 }
 
 func NewState() State {
+	tabs := []Tab{
+		{Title: "PRs"},
+		{Title: "Issues"},
+		{Title: "Alerts"},
+	}
+	notifications := map[string]time.Time{
+		"PRs":    {},
+		"Issues": {},
+		"Alerts": {},
+	}
 	return State{
-		SelectedHeader: HEADERS[0],
-		SelectedItem:   0,
-		Data:           make(map[string][]Item),
+		Data:               make(map[string]HeaderData),
+		Tabs:               tabs,
+		NotificationSentAt: notifications,
 	}
 }
 
-type Data map[string][]Item
+type HeaderData struct {
+	Items      []Item
+	ModifiedAt time.Time
+}
 
 type Item struct {
 	Value       string
@@ -127,27 +150,28 @@ func main() {
 	}
 	rl.SetTargetFPS(60)
 	rl.SetConfigFlags(rl.FlagWindowResizable)
-	rl.InitWindow(int32(WINDOW_WIDTH), int32(WINDOW_HEIGHT), "Daeshboard")
+	windowTitle := PROGRAM_NAME
+	rl.InitWindow(int32(WINDOW_WIDTH), int32(WINDOW_HEIGHT), windowTitle)
 	headerFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HEADER), nil, 256)
 	bodyFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_BODY), nil, 256)
 	helpFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HELP), nil, 256)
 	defer rl.CloseWindow()
 
-	for !rl.WindowShouldClose() {
+	for !rl.WindowShouldClose() && !state.ShouldClose {
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.RayWhite)
 
-		shouldClose := reactToInput(&state)
+		reactToInput(&state)
 
+		drawWindowTitle(&state)
 		drawHeaders(state, headerFont, float32(FONT_SIZE_HEADER))
 		drawRuler()
 		drawBody(state, bodyFont, float32(FONT_SIZE_BODY))
 		drawHelp(helpFont, float32(FONT_SIZE_HELP))
 
+		notifyIfNeeded(&state)
+
 		rl.EndDrawing()
-		if shouldClose {
-			break
-		}
 	}
 }
 
@@ -159,29 +183,50 @@ func updateData(state *State, config Config) {
 			fmt.Fprintf(os.Stderr, "Failed to get pull requests: %s\n", err.Error())
 			os.Exit(1)
 		}
-		state.Data["PRs"] = prs
+		if !slices.Equal(prs, state.Data["PRs"].Items) {
+			fmt.Println("Pull requests updated")
+			state.Data["PRs"] = HeaderData{
+				Items:      prs,
+				ModifiedAt: time.Now(),
+			}
+		}
 		issues, err := getIssues(config.Repos, config.GithubToken)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to get issues: %s\n", err.Error())
 			os.Exit(1)
 		}
-		state.Data["Issues"] = issues
+		if !slices.Equal(issues, state.Data["Issues"].Items) {
+			fmt.Println("Issues updated")
+			state.Data["Issues"] = HeaderData{
+				Items:      issues,
+				ModifiedAt: time.Now(),
+			}
+		}
 		alerts, err := getAlerts(config.Alerts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to get alerts: %s\n", err.Error())
 			os.Exit(1)
 		}
-		state.Data["Alerts"] = alerts
+		if !slices.Equal(alerts, state.Data["Alerts"].Items) {
+			fmt.Println("Alerts updated")
+			state.Data["Alerts"] = HeaderData{
+				Items:      alerts,
+				ModifiedAt: time.Now(),
+			}
+		}
 		time.Sleep(10 * time.Second)
 	}
 }
 
+type PR struct {
+	Title     string    `json:"title"`
+	HtmlURL   string    `json:"html_url"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func getPrs(repos []Repo, token string) ([]Item, error) {
-	var prs []Item
-	var body []struct {
-		Title   string `json:"title"`
-		HtmlURL string `json:"html_url"`
-	}
+	var items []Item
+	var prs []PR
 	for _, r := range repos {
 		url := fmt.Sprintf("https://api.github.com/repos/%s/pulls", r)
 		req, err := http.NewRequest("GET", url, nil)
@@ -199,28 +244,34 @@ func getPrs(repos []Repo, token string) ([]Item, error) {
 		if resp.StatusCode != 200 {
 			return []Item{}, fmt.Errorf("Got non-200 status code when getting pull request for repo %s: %s\n", r, resp.Status)
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&prs); err != nil {
 			return []Item{}, fmt.Errorf("Could not parse pull request response for repo %s: %s", r, err.Error())
 		}
-		for _, pr := range body {
-			prs = append(prs, Item{
+		slices.SortFunc(prs, func(a, b PR) int {
+			return -1 * a.CreatedAt.Compare(b.CreatedAt)
+		})
+		for _, pr := range prs {
+			items = append(items, Item{
 				Value: fmt.Sprintf("%s: %s", r, pr.Title),
 				URL:   pr.HtmlURL,
 			})
 		}
 	}
-	return prs, nil
+	return items, nil
+}
+
+type Issue struct {
+	Title       string `json:"title"`
+	HtmlURL     string `json:"html_url"`
+	PullRequest struct {
+		URL string `json:"url"`
+	} `json:"pull_request"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func getIssues(repos []Repo, token string) ([]Item, error) {
-	var issues []Item
-	var body []struct {
-		Title       string `json:"title"`
-		HtmlURL     string `json:"html_url"`
-		PullRequest struct {
-			URL string `json:"url"`
-		} `json:"pull_request"`
-	}
+	var items []Item
+	var issues []Issue
 	for _, r := range repos {
 		url := fmt.Sprintf("https://api.github.com/repos/%s/issues", r)
 		req, err := http.NewRequest("GET", url, nil)
@@ -238,29 +289,35 @@ func getIssues(repos []Repo, token string) ([]Item, error) {
 		if resp.StatusCode != 200 {
 			return []Item{}, fmt.Errorf("Got non-200 status code when getting issues for repo %s: %s\n", r, resp.Status)
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
 			return []Item{}, fmt.Errorf("Could not parse issue response for repo %s: %s", r, err.Error())
 		}
-		for _, issue := range body {
+		slices.SortFunc(issues, func(a, b Issue) int {
+			return -1 * a.CreatedAt.Compare(b.CreatedAt)
+		})
+		for _, issue := range issues {
 			// The issues endpoint returns pull requests as well, see
 			// https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
 			if issue.PullRequest.URL == "" {
-				issues = append(issues, Item{
+				items = append(items, Item{
 					Value: fmt.Sprintf("%s: %s", r, issue.Title),
 					URL:   issue.HtmlURL,
 				})
 			}
 		}
 	}
-	return issues, nil
+	return items, nil
+}
+
+type Alert struct {
+	Annotations struct {
+		Description string `json:"description"`
+	} `json:"annotations"`
+	StartsAt time.Time `json:"startsAt"`
 }
 
 func getAlerts(alertsConfig AlertsConfig) ([]Item, error) {
-	var body []struct {
-		Annotations struct {
-			Description string `json:"description"`
-		} `json:"annotations"`
-	}
+	var alerts []Alert
 	query := fmt.Sprintf("receiver=%s&silenced=false&inhibited=false", url.QueryEscape(alertsConfig.Receiver))
 	url := fmt.Sprintf("%s/api/v2/alerts?%s", alertsConfig.Server, query)
 	resp, err := http.Get(url)
@@ -271,61 +328,64 @@ func getAlerts(alertsConfig AlertsConfig) ([]Item, error) {
 	if resp.StatusCode != 200 {
 		return []Item{}, fmt.Errorf("Got non-200 status code when getting alerts: %s\n", resp.Status)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&alerts); err != nil {
 		return []Item{}, fmt.Errorf("Could not parse alerts response: %s", err.Error())
 	}
-	var alerts []Item
-	for _, a := range body {
-		alerts = append(alerts, Item{
+	slices.SortFunc(alerts, func(a, b Alert) int {
+		return -1 * a.StartsAt.Compare(b.StartsAt)
+	})
+	var items []Item
+	for _, a := range alerts {
+		items = append(items, Item{
 			Value: a.Annotations.Description,
 			URL:   fmt.Sprintf("%s/#/alerts?%s", alertsConfig.Server, query),
 		})
 	}
-	return alerts, nil
+	return items, nil
 }
 
-func reactToInput(state *State) bool {
-	shouldClose := false
-	nItems := len(state.Data[state.SelectedHeader])
+func reactToInput(state *State) {
+	gotInput := true
+	nItems := len(state.Data[state.Tabs[state.SelectedTab].Title].Items)
 	switch rl.GetKeyPressed() {
 	case rl.KeyLeft, rl.KeyA, rl.KeyH:
-		index := slices.Index(HEADERS, state.SelectedHeader)
-		newIndex := max(0, index-1)
-		if newIndex != index {
-			state.SelectedHeader = HEADERS[newIndex]
-			state.SelectedItem = 0
+		newSelectedTab := max(0, state.SelectedTab-1)
+		if newSelectedTab != state.SelectedTab {
+			state.SelectedTab = newSelectedTab
 		}
 	case rl.KeyRight, rl.KeyD, rl.KeyL:
-		index := slices.Index(HEADERS, state.SelectedHeader)
-		newIndex := min(len(HEADERS)-1, index+1)
-		if newIndex != index {
-			state.SelectedHeader = HEADERS[newIndex]
-			state.SelectedItem = 0
+		newSelectedTab := min(len(state.Tabs)-1, state.SelectedTab+1)
+		if newSelectedTab != state.SelectedTab {
+			state.SelectedTab = newSelectedTab
 		}
 	case rl.KeyUp, rl.KeyW, rl.KeyK:
-		state.SelectedItem = max(0, state.SelectedItem-1)
+		state.Tabs[state.SelectedTab].SelectedItem = max(0, state.Tabs[state.SelectedTab].SelectedItem-1)
 	case rl.KeyDown, rl.KeyS, rl.KeyJ:
-		state.SelectedItem = min(nItems-1, state.SelectedItem+1)
+		state.Tabs[state.SelectedTab].SelectedItem = min(nItems-1, state.Tabs[state.SelectedTab].SelectedItem+1)
 	case rl.KeyEnter, rl.KeySpace:
 		openApplication(*state)
 	case rl.KeyOne:
-		state.SelectedHeader = HEADERS[0]
+		state.SelectedTab = 0
 	case rl.KeyTwo:
-		state.SelectedHeader = HEADERS[1]
+		state.SelectedTab = 1
 	case rl.KeyThree:
-		state.SelectedHeader = HEADERS[2]
+		state.SelectedTab = 2
 	case rl.KeyQ:
-		shouldClose = true
+		state.ShouldClose = true
+	default:
+		gotInput = false
 	}
-	return shouldClose
+	if gotInput {
+		state.Tabs[state.SelectedTab].LastViewedAt = time.Now()
+	}
 }
 
 func openApplication(state State) {
 	// TODO: Default app or url to open when there are no items?
-	if len(state.Data[state.SelectedHeader]) == 0 {
+	if len(state.Data[state.Tabs[state.SelectedTab].Title].Items) == 0 {
 		return
 	}
-	item := state.Data[state.SelectedHeader][state.SelectedItem]
+	item := state.Data[state.Tabs[state.SelectedTab].Title].Items[state.Tabs[state.SelectedTab].SelectedItem]
 	if item.Application != "" {
 		cmd := exec.Command("open", "-a", item.Application)
 		cmd.Run()
@@ -334,20 +394,67 @@ func openApplication(state State) {
 	}
 }
 
+func drawWindowTitle(state *State) {
+	for _, t := range state.Tabs {
+		if t.LastViewedAt.Before(state.Data[t.Title].ModifiedAt) {
+			rl.SetWindowTitle(fmt.Sprintf("● %s", PROGRAM_NAME))
+			return
+		}
+	}
+	rl.SetWindowTitle(PROGRAM_NAME)
+}
+
 func drawHeaders(state State, font rl.Font, fontSize float32) {
 	rects := getHeaderRects(len(HEADERS))
-	selectedHeaderIndex := slices.Index(HEADERS, state.SelectedHeader)
-	for i, rect := range rects {
-		if i == selectedHeaderIndex {
-			rl.DrawRectangleRounded(rect, 1, 1, COLOR_SELECTED_HEADER)
+	for i, tab := range state.Tabs {
+		if i == state.SelectedTab {
+			rl.DrawRectangleRounded(rects[i], 1, 1, COLOR_SELECTED_HEADER)
 		}
-		header := HEADERS[i]
-		nItems := len(state.Data[header])
-		text := fmt.Sprintf("%s [%d]", header, nItems)
+		nItems := len(state.Data[tab.Title].Items)
+		notice := ""
+
+		if tab.LastViewedAt.Before(state.Data[tab.Title].ModifiedAt) {
+			notice = "*"
+		}
+		text := fmt.Sprintf("%s%s [%d]", notice, tab.Title, nItems)
 		textWidth := rl.MeasureText(text, int32(FONT_SIZE_HEADER))
-		padX := (rect.Width - float32(textWidth)) / 2
-		rl.DrawTextEx(font, text, rl.NewVector2(rect.X+padX, rect.Y), fontSize, 0, COLOR_HEADER)
+		padX := (rects[i].Width - float32(textWidth)) / 2
+		rl.DrawTextEx(font, text, rl.NewVector2(rects[i].X+padX, rects[i].Y), fontSize, 0, COLOR_HEADER)
 	}
+}
+
+// Send a desktop notification if any of the tab's data was updated
+// after the last notification was sent for that tab
+func notifyIfNeeded(state *State) {
+	for tab, t := range state.NotificationSentAt {
+		if t.IsZero() {
+			// Do not send a notification the first time the data has been
+			// updated, since this happens at startup
+			state.NotificationSentAt[tab] = state.Data[tab].ModifiedAt
+		} else {
+			if t.Before(state.Data[tab].ModifiedAt) {
+				state.NotificationSentAt[tab] = state.Data[tab].ModifiedAt
+				if err := Notify(tab); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to create notification: %s\n", err.Error())
+					os.Exit(1)
+				}
+			}
+		}
+	}
+
+}
+
+// TODO: Make cross-platform
+func Notify(tab string) error {
+	osa, err := exec.LookPath("osascript")
+	if err != nil {
+		return err
+	}
+
+	msg := fmt.Sprintf("Something %s happend, lol?", tab)
+	script := fmt.Sprintf("display notification %q with title %q", msg, PROGRAM_NAME)
+	cmd := exec.Command(osa, "-e", script)
+	return cmd.Run()
 }
 
 func drawRuler() {
@@ -356,10 +463,11 @@ func drawRuler() {
 }
 
 func drawBody(state State, font rl.Font, fontSize float32) {
-	data := state.Data[state.SelectedHeader]
-	for i, d := range data {
+	selectedTab := state.Tabs[state.SelectedTab]
+	data := state.Data[selectedTab.Title]
+	for i, d := range data.Items {
 		y := BODY_Y + i*(FONT_SIZE_BODY+5)
-		if i == state.SelectedItem {
+		if i == selectedTab.SelectedItem {
 			textWidth := rl.MeasureText(d.Value, int32(FONT_SIZE_BODY))
 			padding := float32(10)
 			rect := rl.NewRectangle(float32(PAD_X)-padding, float32(y), float32(textWidth)+2*padding, float32(FONT_SIZE_BODY))
