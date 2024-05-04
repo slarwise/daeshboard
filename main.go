@@ -92,10 +92,11 @@ func buildConfig(filename string) (Config, error) {
 }
 
 type State struct {
-	SelectedTab int
-	Tabs        []Tab
-	Data        map[string]HeaderData
-	ShouldClose bool
+	SelectedTab        int
+	Tabs               []Tab
+	Data               map[string]HeaderData
+	ShouldClose        bool
+	NotificationSentAt map[string]time.Time
 }
 
 type Tab struct {
@@ -104,21 +105,21 @@ type Tab struct {
 	LastViewedAt time.Time
 }
 
-type TabState struct {
-	Selected     bool
-	SelectedItem int
-	Unread       bool
-}
-
 func NewState() State {
 	tabs := []Tab{
 		{Title: "PRs"},
 		{Title: "Issues"},
 		{Title: "Alerts"},
 	}
+	notifications := map[string]time.Time{
+		"PRs":    {},
+		"Issues": {},
+		"Alerts": {},
+	}
 	return State{
-		Data: make(map[string]HeaderData),
-		Tabs: tabs,
+		Data:               make(map[string]HeaderData),
+		Tabs:               tabs,
+		NotificationSentAt: notifications,
 	}
 }
 
@@ -154,21 +155,9 @@ func main() {
 	helpFont := rl.LoadFontEx("JetBrainsMonoNerdFont-Medium.ttf", 2*int32(FONT_SIZE_HELP), nil, 256)
 	defer rl.CloseWindow()
 
-	lastModifiedAt := map[string]time.Time{
-		"PRs":    time.Now(),
-		"Issues": time.Now(),
-		"Alerts": time.Now(),
-	}
 	for !rl.WindowShouldClose() && !state.ShouldClose {
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.RayWhite)
-		// Read the input and update the state
-		// Draw stuff based on the state
-
-		// Notifications:
-		//     Show in the window title if any of the tabs was last viewed before its data was modified
-		//     Show in the tab titles if the tab was last viewed before its data was modified
-		//     Send a notification whenever any of the data's last modified at was updated
 
 		reactToInput(&state)
 
@@ -178,7 +167,7 @@ func main() {
 		drawBody(state, bodyFont, float32(FONT_SIZE_BODY))
 		drawHelp(helpFont, float32(FONT_SIZE_HELP))
 
-		notifyIfNeeded(&state, lastModifiedAt)
+		notifyIfNeeded(&state)
 
 		rl.EndDrawing()
 	}
@@ -432,27 +421,36 @@ func drawHeaders(state State, font rl.Font, fontSize float32) {
 	}
 }
 
-func notifyIfNeeded(state *State, lastModifiedAt map[string]time.Time) {
-	// Send a notification whenever any of the data's last modified at was updated
-	for key, t := range lastModifiedAt {
-		if t.Before(state.Data[key].ModifiedAt) {
-			lastModifiedAt[key] = state.Data[key].ModifiedAt
-			if err := Notify(); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to create notification: %s\n", err.Error())
-				os.Exit(1)
+// Send a desktop notification if any of the tab's data was updated
+// after the last notification was sent for that tab
+func notifyIfNeeded(state *State) {
+	for tab, t := range state.NotificationSentAt {
+		if t.IsZero() {
+			// Do not send a notification the first time the data has been
+			// updated, since this happens at startup
+			state.NotificationSentAt[tab] = state.Data[tab].ModifiedAt
+		} else {
+			if t.Before(state.Data[tab].ModifiedAt) {
+				state.NotificationSentAt[tab] = state.Data[tab].ModifiedAt
+				if err := Notify(tab); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to create notification: %s\n", err.Error())
+					os.Exit(1)
+				}
 			}
 		}
 	}
 
 }
 
-func Notify() error {
+// TODO: Make cross-platform
+func Notify(tab string) error {
 	osa, err := exec.LookPath("osascript")
 	if err != nil {
 		return err
 	}
 
-	script := fmt.Sprintf("display notification %q with title %q", "Something happened", "Daeshboard")
+	msg := fmt.Sprintf("Something %s happend, lol?", tab)
+	script := fmt.Sprintf("display notification %q with title %q", msg, "Daeshboard")
 	cmd := exec.Command(osa, "-e", script)
 	return cmd.Run()
 }
