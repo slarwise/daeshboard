@@ -58,6 +58,32 @@ func ListIssuesForRepo(owner, repo, token string) ([]Issue, error) {
 	return filteredIssues, nil
 }
 
+type WorkflowRunsResponse struct {
+	TotalCount   int           `json:"total_count"`
+	WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+}
+
+type WorkflowRun struct {
+	Name       string    `json:"name"`
+	Status     string    `json:"status"`
+	Conclusion string    `json:"conclusion"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// List the last 5 workflows for a repo
+func ListWorkflowRunsForRepo(owner, repo, token string) ([]WorkflowRun, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/runs?per_page=5", owner, repo)
+	resp, err := get(url, token)
+	if err != nil {
+		return []WorkflowRun{}, fmt.Errorf("Failed to list workflow runs for %s/%s: %s", owner, repo, err.Error())
+	}
+	var response WorkflowRunsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return []WorkflowRun{}, fmt.Errorf("Failed to parse workflow runs response: %s", err.Error())
+	}
+	return response.WorkflowRuns, nil
+}
+
 var nextPagePattern = regexp.MustCompile(`<([\S]+)>; rel="next"`)
 
 // Extracts the url to the next page from the link header
@@ -74,16 +100,9 @@ func list[T PR | Issue](url, token string) ([]T, error) {
 	currentPage := url
 	var allOutput []T
 	for currentPage != "" {
-		req, err := http.NewRequest("GET", currentPage, nil)
+		resp, err := get(currentPage, token)
 		if err != nil {
-			return []T{}, fmt.Errorf("Could not create GET request: %s", err.Error())
-		}
-		if token != "" {
-			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return []T{}, fmt.Errorf("Failed to make request: %s", err.Error())
+			return []T{}, err
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != 200 {
@@ -97,4 +116,19 @@ func list[T PR | Issue](url, token string) ([]T, error) {
 		currentPage = getNextPage(resp.Header.Get("Link"))
 	}
 	return allOutput, nil
+}
+
+func get(url, token string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Could not create GET request: %s", err.Error())
+	}
+	if token != "" {
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to make request: %s", err.Error())
+	}
+	return resp, nil
 }
