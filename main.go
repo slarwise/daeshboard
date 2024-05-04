@@ -183,7 +183,7 @@ func updateData(state *State, config Config) {
 			fmt.Fprintf(os.Stderr, "Failed to get pull requests: %s\n", err.Error())
 			os.Exit(1)
 		}
-		if !slices.Equal(prs, state.Data["PRs"].Items) {
+		if state.Data["PRs"].ModifiedAt.IsZero() || !slices.Equal(prs, state.Data["PRs"].Items) {
 			fmt.Println("Pull requests updated")
 			state.Data["PRs"] = HeaderData{
 				Items:      prs,
@@ -195,7 +195,7 @@ func updateData(state *State, config Config) {
 			fmt.Fprintf(os.Stderr, "Failed to get issues: %s\n", err.Error())
 			os.Exit(1)
 		}
-		if !slices.Equal(issues, state.Data["Issues"].Items) {
+		if state.Data["Issues"].ModifiedAt.IsZero() || !slices.Equal(issues, state.Data["Issues"].Items) {
 			fmt.Println("Issues updated")
 			state.Data["Issues"] = HeaderData{
 				Items:      issues,
@@ -207,7 +207,7 @@ func updateData(state *State, config Config) {
 			fmt.Fprintf(os.Stderr, "Failed to get alerts: %s\n", err.Error())
 			os.Exit(1)
 		}
-		if !slices.Equal(alerts, state.Data["Alerts"].Items) {
+		if state.Data["Alerts"].ModifiedAt.IsZero() || !slices.Equal(alerts, state.Data["Alerts"].Items) {
 			fmt.Println("Alerts updated")
 			state.Data["Alerts"] = HeaderData{
 				Items:      alerts,
