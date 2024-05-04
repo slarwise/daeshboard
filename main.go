@@ -235,41 +235,13 @@ func getPrs(repos []Repo, token string) ([]Item, error) {
 	return items, nil
 }
 
-type Issue struct {
-	Title       string `json:"title"`
-	HtmlURL     string `json:"html_url"`
-	PullRequest struct {
-		URL string `json:"url"`
-	} `json:"pull_request"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 func getIssues(repos []Repo, token string) ([]Item, error) {
 	var items []Item
-	var issues []Issue
 	for _, r := range repos {
-		url := fmt.Sprintf("https://api.github.com/repos/%s/issues", r)
-		req, err := http.NewRequest("GET", url, nil)
+		issues, err := github.ListIssuesForRepo(r.Owner, r.Name, token)
 		if err != nil {
-			return []Item{}, fmt.Errorf("Could not build request to get pull requests: %s", err.Error())
+			return []Item{}, fmt.Errorf("Failed to list issues: %s", err.Error())
 		}
-		if token != "" {
-			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return []Item{}, fmt.Errorf("Could not get issues for repo %s: %s\n", r, err.Error())
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return []Item{}, fmt.Errorf("Got non-200 status code when getting issues for repo %s: %s\n", r, resp.Status)
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
-			return []Item{}, fmt.Errorf("Could not parse issue response for repo %s: %s", r, err.Error())
-		}
-		slices.SortFunc(issues, func(a, b Issue) int {
-			return -1 * a.CreatedAt.Compare(b.CreatedAt)
-		})
 		for _, issue := range issues {
 			// The issues endpoint returns pull requests as well, see
 			// https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
