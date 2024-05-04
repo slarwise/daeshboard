@@ -243,14 +243,10 @@ func getIssues(repos []Repo, token string) ([]Item, error) {
 			return []Item{}, fmt.Errorf("Failed to list issues: %s", err.Error())
 		}
 		for _, issue := range issues {
-			// The issues endpoint returns pull requests as well, see
-			// https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
-			if issue.PullRequest.URL == "" {
-				items = append(items, Item{
-					Value: fmt.Sprintf("%s: %s", r, issue.Title),
-					URL:   issue.HtmlURL,
-				})
-			}
+			items = append(items, Item{
+				Value: fmt.Sprintf("%s: %s", r, issue.Title),
+				URL:   issue.HtmlURL,
+			})
 		}
 	}
 	return items, nil
