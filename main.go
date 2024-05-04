@@ -12,6 +12,7 @@ import (
 	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"gui/internal/github"
 )
 
 var (
@@ -177,7 +178,6 @@ func main() {
 
 func updateData(state *State, config Config) {
 	for {
-		// TODO: Handle multiple pages in github responses
 		prs, err := getPrs(config.Repos, config.GithubToken)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to get pull requests: %s\n", err.Error())
@@ -218,38 +218,13 @@ func updateData(state *State, config Config) {
 	}
 }
 
-type PR struct {
-	Title     string    `json:"title"`
-	HtmlURL   string    `json:"html_url"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 func getPrs(repos []Repo, token string) ([]Item, error) {
 	var items []Item
-	var prs []PR
 	for _, r := range repos {
-		url := fmt.Sprintf("https://api.github.com/repos/%s/pulls", r)
-		req, err := http.NewRequest("GET", url, nil)
+		prs, err := github.ListPRsForRepo(r.Owner, r.Name, token)
 		if err != nil {
-			return []Item{}, fmt.Errorf("Could not build request to get pull requests: %s", err.Error())
+			return []Item{}, fmt.Errorf("Failed to list PRs: %s", err.Error())
 		}
-		if token != "" {
-			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return []Item{}, fmt.Errorf("Could not get pull requests for repo %s: %s\n", r, err.Error())
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return []Item{}, fmt.Errorf("Got non-200 status code when getting pull request for repo %s: %s\n", r, resp.Status)
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&prs); err != nil {
-			return []Item{}, fmt.Errorf("Could not parse pull request response for repo %s: %s", r, err.Error())
-		}
-		slices.SortFunc(prs, func(a, b PR) int {
-			return -1 * a.CreatedAt.Compare(b.CreatedAt)
-		})
 		for _, pr := range prs {
 			items = append(items, Item{
 				Value: fmt.Sprintf("%s: %s", r, pr.Title),
