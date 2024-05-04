@@ -182,7 +182,7 @@ func updateData(state *State, config Config) {
 			os.Exit(1)
 		}
 		if !slices.Equal(prs, state.Data["PRs"].Items) {
-			fmt.Println("New PR!")
+			fmt.Println("Pull requests updated")
 			state.Data["PRs"] = HeaderData{
 				Items:      prs,
 				ModifiedAt: time.Now(),
@@ -194,7 +194,7 @@ func updateData(state *State, config Config) {
 			os.Exit(1)
 		}
 		if !slices.Equal(issues, state.Data["Issues"].Items) {
-			fmt.Println("New issue!")
+			fmt.Println("Issues updated")
 			state.Data["Issues"] = HeaderData{
 				Items:      issues,
 				ModifiedAt: time.Now(),
@@ -206,7 +206,7 @@ func updateData(state *State, config Config) {
 			os.Exit(1)
 		}
 		if !slices.Equal(alerts, state.Data["Alerts"].Items) {
-			fmt.Println("New alert!")
+			fmt.Println("Alerts updated")
 			state.Data["Alerts"] = HeaderData{
 				Items:      alerts,
 				ModifiedAt: time.Now(),
