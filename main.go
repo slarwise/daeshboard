@@ -27,7 +27,7 @@ var (
 	FONT_SIZE_BODY   = 25
 	FONT_SIZE_HELP   = 20
 
-	HEADERS = []string{"PRs", "Issues", "Alerts"}
+	HEADERS = []string{"PRs", "Issues", "Alerts", "Workflow runs"}
 
 	COLOR_BLUE_BG = rl.NewColor(91, 206, 250, 100)
 	COLOR_PINK_BG = rl.NewColor(245, 169, 184, 100)
@@ -113,11 +113,13 @@ func NewState() State {
 		{Title: "PRs"},
 		{Title: "Issues"},
 		{Title: "Alerts"},
+		{Title: "Workflow runs"},
 	}
 	notifications := map[string]time.Time{
-		"PRs":    {},
-		"Issues": {},
-		"Alerts": {},
+		"PRs":           {},
+		"Issues":        {},
+		"Alerts":        {},
+		"Workflow runs": {},
 	}
 	return State{
 		Data:               make(map[string]HeaderData),
@@ -214,6 +216,18 @@ func updateData(state *State, config Config) {
 				ModifiedAt: time.Now(),
 			}
 		}
+		workflowRuns, err := getWorkflowRuns(config.Repos, config.GithubToken)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to get workflow runs: %s\n", err.Error())
+			os.Exit(1)
+		}
+		if state.Data["Workflow runs"].ModifiedAt.IsZero() || !slices.Equal(workflowRuns, state.Data["Workflow runs"].Items) {
+			fmt.Println("Workflow runs updated")
+			state.Data["Workflow runs"] = HeaderData{
+				Items:      workflowRuns,
+				ModifiedAt: time.Now(),
+			}
+		}
 		time.Sleep(10 * time.Second)
 	}
 }
@@ -287,6 +301,23 @@ func getAlerts(alertsConfig AlertsConfig) ([]Item, error) {
 	return items, nil
 }
 
+func getWorkflowRuns(repos []Repo, token string) ([]Item, error) {
+	var items []Item
+	for _, r := range repos {
+		runs, err := github.ListWorkflowRunsForRepo(r.Owner, r.Name, token)
+		if err != nil {
+			return []Item{}, fmt.Errorf("Failed to list workflow runs: %s", err.Error())
+		}
+		for _, run := range runs {
+			items = append(items, Item{
+				Value: fmt.Sprintf("[%s] %s: %s", run.Conclusion, r, run.Name),
+				URL:   run.HtmlURL,
+			})
+		}
+	}
+	return items, nil
+}
+
 func reactToInput(state *State) {
 	gotInput := true
 	nItems := len(state.Data[state.Tabs[state.SelectedTab].Title].Items)
@@ -313,6 +344,8 @@ func reactToInput(state *State) {
 		state.SelectedTab = 1
 	case rl.KeyThree:
 		state.SelectedTab = 2
+	case rl.KeyFour:
+		state.SelectedTab = 3
 	case rl.KeyQ:
 		state.ShouldClose = true
 	default:

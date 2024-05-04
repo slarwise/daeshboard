@@ -68,6 +68,7 @@ type WorkflowRun struct {
 	Status     string    `json:"status"`
 	Conclusion string    `json:"conclusion"`
 	CreatedAt  time.Time `json:"created_at"`
+	HtmlURL    string    `json:"html_url"`
 }
 
 // List the last 5 workflows for a repo
