@@ -27,8 +27,6 @@ var (
 	FONT_SIZE_BODY   = 20
 	FONT_SIZE_HELP   = 20
 
-	HEADERS = []string{"PRs", "Issues", "Alerts", "Workflow runs"}
-
 	COLOR_BLUE_BG = rl.NewColor(91, 206, 250, 100)
 	COLOR_PINK_BG = rl.NewColor(245, 169, 184, 100)
 	COLOR_BLACK   = rl.NewColor(0, 0, 0, 255)
@@ -95,15 +93,33 @@ func buildConfig(filename string) (Config, error) {
 }
 
 type State struct {
-	TabIDs             []TabID
-	SelectedTab        TabID
-	TabDisplays        map[TabID]TabDisplay
-	TabData            map[TabID]TabData
+	TabIDs             []string
+	SelectedTab        string
+	TabDisplays        map[string]TabDisplay
+	TabData            map[string]TabData
 	ShouldClose        bool
-	NotificationSentAt map[TabID]time.Time
+	NotificationSentAt map[string]time.Time
 }
 
-type TabID int8
+func newState() State {
+	return State{
+		TabIDs:             []string{},
+		SelectedTab:        "",
+		TabDisplays:        map[string]TabDisplay{},
+		TabData:            map[string]TabData{},
+		ShouldClose:        false,
+		NotificationSentAt: map[string]time.Time{},
+	}
+}
+
+func (s *State) addTab(title string, itemsGetter func() ([]Item, error)) {
+	s.TabIDs = append(s.TabIDs, title)
+	s.TabData[title] = TabData{GetItems: itemsGetter}
+	s.TabDisplays[title] = TabDisplay{Title: title}
+	if s.SelectedTab == "" {
+		s.SelectedTab = title
+	}
+}
 
 type TabDisplay struct {
 	Title        string
@@ -129,31 +145,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Could not parse config file: %s", err.Error())
 		os.Exit(1)
 	}
-	prsID := TabID(0)
-	issuesID := TabID(1)
-	alertsID := TabID(2)
-	workflowsID := TabID(3)
-	tabIDs := []TabID{prsID, issuesID, alertsID, workflowsID}
-	tabDisplays := map[TabID]TabDisplay{
-		prsID:       {Title: "PRs"},
-		issuesID:    {Title: "Issues"},
-		alertsID:    {Title: "Alerts"},
-		workflowsID: {Title: "Workflows"},
-	}
-	tabData := map[TabID]TabData{
-		prsID:       {GetItems: getPrs(config.Repos, config.GithubToken)},
-		issuesID:    {GetItems: getIssues(config.Repos, config.GithubToken)},
-		alertsID:    {GetItems: getAlerts(config.Alerts)},
-		workflowsID: {GetItems: getWorkflowRuns(config.Repos, config.GithubToken)},
-	}
-	state := State{
-		TabIDs:             tabIDs,
-		SelectedTab:        0,
-		TabDisplays:        tabDisplays,
-		TabData:            tabData,
-		ShouldClose:        false,
-		NotificationSentAt: make(map[TabID]time.Time),
-	}
+	state := newState()
+	state.addTab("PRs", getPrs(config.Repos, config.GithubToken))
+	state.addTab("Issues", getIssues(config.Repos, config.GithubToken))
+	state.addTab("Alerts", getAlerts(config.Alerts))
+	state.addTab("Workflows", getWorkflowRuns(config.Repos, config.GithubToken))
 	go updateData(&state)
 
 	if os.Getenv("LOG") == "false" {
@@ -178,7 +174,7 @@ func main() {
 		drawHeaders(state, headerFont, float32(FONT_SIZE_HEADER))
 		drawRuler()
 		drawBody(state, bodyFont, float32(FONT_SIZE_BODY))
-		drawHelp(helpFont, float32(FONT_SIZE_HELP))
+		drawHelp(state, helpFont, float32(FONT_SIZE_HELP))
 
 		notifyIfNeeded(&state)
 
@@ -190,11 +186,11 @@ func updateData(state *State) {
 	for _, tabID := range state.TabIDs {
 		items, err := state.TabData[tabID].GetItems()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to get items for tab %d: %s\n", tabID, err.Error())
+			fmt.Fprintf(os.Stderr, "Failed to get items for tab %s: %s\n", tabID, err.Error())
 			os.Exit(1)
 		}
 		if state.TabData[tabID].ModifiedAt.IsZero() || !slices.Equal(items, state.TabData[tabID].Items) {
-			fmt.Printf("Updated items for tab %d\n", tabID)
+			fmt.Printf("Updated items for tab %s\n", tabID)
 			state.TabData[tabID] = TabData{
 				Items:      items,
 				ModifiedAt: time.Now(),
@@ -303,14 +299,16 @@ func reactToInput(state *State) {
 	nItems := len(state.TabData[state.SelectedTab].Items)
 	switch rl.GetKeyPressed() {
 	case rl.KeyLeft, rl.KeyA, rl.KeyH:
-		newSelectedTab := max(0, state.SelectedTab-1)
-		if newSelectedTab != state.SelectedTab {
-			state.SelectedTab = newSelectedTab
+		tabIdx := slices.Index(state.TabIDs, state.SelectedTab)
+		newTabIdx := max(0, tabIdx-1)
+		if newTabIdx != tabIdx {
+			state.SelectedTab = state.TabIDs[newTabIdx]
 		}
 	case rl.KeyRight, rl.KeyD, rl.KeyL:
-		newSelectedTab := min(len(state.TabIDs)-1, int(state.SelectedTab+1))
-		if newSelectedTab != int(state.SelectedTab) {
-			state.SelectedTab = TabID(newSelectedTab)
+		tabIdx := slices.Index(state.TabIDs, state.SelectedTab)
+		newTabIdx := min(len(state.TabIDs)-1, tabIdx+1)
+		if newTabIdx != tabIdx {
+			state.SelectedTab = state.TabIDs[newTabIdx]
 		}
 	case rl.KeyUp, rl.KeyW, rl.KeyK:
 		tab := state.TabDisplays[state.SelectedTab]
@@ -323,13 +321,13 @@ func reactToInput(state *State) {
 	case rl.KeyEnter, rl.KeySpace:
 		openApplication(*state)
 	case rl.KeyOne:
-		state.SelectedTab = 0
+		state.SelectedTab = state.TabIDs[0]
 	case rl.KeyTwo:
-		state.SelectedTab = 1
+		state.SelectedTab = state.TabIDs[1]
 	case rl.KeyThree:
-		state.SelectedTab = 2
+		state.SelectedTab = state.TabIDs[2]
 	case rl.KeyFour:
-		state.SelectedTab = 3
+		state.SelectedTab = state.TabIDs[3]
 	case rl.KeyQ:
 		state.ShouldClose = true
 	default:
@@ -367,7 +365,7 @@ func drawWindowTitle(state *State) {
 }
 
 func drawHeaders(state State, font rl.Font, fontSize float32) {
-	rects := getHeaderRects(len(HEADERS))
+	rects := getHeaderRects(len(state.TabIDs))
 	for i, tabID := range state.TabIDs {
 		if tabID == state.SelectedTab {
 			rl.DrawRectangleRounded(rects[i], 1, 1, COLOR_SELECTED_HEADER)
@@ -440,8 +438,8 @@ func drawBody(state State, font rl.Font, fontSize float32) {
 	}
 }
 
-func drawHelp(font rl.Font, fontSize float32) {
-	text := fmt.Sprintf(`<hjkl, wasd, arrows, 1..%d> MOVE    <enter, space> OPEN    <q> QUIT`, len(HEADERS))
+func drawHelp(state State, font rl.Font, fontSize float32) {
+	text := fmt.Sprintf(`<hjkl, wasd, arrows, 1..%d> MOVE    <enter, space> OPEN    <q> QUIT`, len(state.TabIDs))
 	textWidth := rl.MeasureText(text, int32(FONT_SIZE_HELP))
 	x := (rl.GetScreenWidth() - int(textWidth)) / 2
 	y := rl.GetScreenHeight() - HELP_Y_PADDING
