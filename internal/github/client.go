@@ -16,8 +16,9 @@ type PR struct {
 }
 
 // Returns all open PRs for a repo, with the most recent PRs first
-func ListPRsForRepo(owner, repo, token string) ([]PR, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls", owner, repo)
+func ListPRsForRepo(host, owner, repo, token string) ([]PR, error) {
+	baseUrl := baseUrlFromHost(host)
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls", baseUrl, owner, repo)
 	prs, err := list[PR](url, token)
 	if err != nil {
 		return []PR{}, fmt.Errorf("Failed to list pull requests: %s", err.Error())
@@ -38,8 +39,9 @@ type Issue struct {
 }
 
 // Returns all open issues for a repo, with the most recent issues first
-func ListIssuesForRepo(owner, repo, token string) ([]Issue, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues", owner, repo)
+func ListIssuesForRepo(host, owner, repo, token string) ([]Issue, error) {
+	baseUrl := baseUrlFromHost(host)
+	url := fmt.Sprintf("%s/repos/%s/%s/issues", baseUrl, owner, repo)
 	issues, err := list[Issue](url, token)
 	if err != nil {
 		return []Issue{}, fmt.Errorf("Failed to list issues: %s", err.Error())
@@ -72,8 +74,9 @@ type WorkflowRun struct {
 }
 
 // List the last 5 workflows for a repo
-func ListWorkflowRunsForRepo(owner, repo, token string) ([]WorkflowRun, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/runs?per_page=5", owner, repo)
+func ListWorkflowRunsForRepo(host, owner, repo, token string) ([]WorkflowRun, error) {
+	baseUrl := baseUrlFromHost(host)
+	url := fmt.Sprintf("%s/repos/%s/%s/actions/runs?per_page=5", baseUrl, owner, repo)
 	resp, err := get(url, token)
 	if err != nil {
 		return []WorkflowRun{}, fmt.Errorf("Failed to list workflow runs for %s/%s: %s", owner, repo, err.Error())
@@ -83,6 +86,14 @@ func ListWorkflowRunsForRepo(owner, repo, token string) ([]WorkflowRun, error) {
 		return []WorkflowRun{}, fmt.Errorf("Failed to parse workflow runs response: %s", err.Error())
 	}
 	return response.WorkflowRuns, nil
+}
+
+func baseUrlFromHost(host string) string {
+	if host == "github.com" {
+		return "https://api.github.com"
+	} else {
+		return fmt.Sprintf("https://%s/api/v3", host)
+	}
 }
 
 var nextPagePattern = regexp.MustCompile(`<([\S]+)>; rel="next"`)
