@@ -43,9 +43,9 @@ var (
 )
 
 type Config struct {
-	Repos       []Repo
-	Alerts      AlertsConfig
-	GithubToken string
+	Repos        []Repo
+	Alerts       AlertsConfig
+	GithubTokens map[string]string
 }
 
 type AlertsConfig struct {
@@ -54,6 +54,7 @@ type AlertsConfig struct {
 }
 
 type Repo struct {
+	Host  string
 	Owner string
 	Name  string
 }
@@ -80,15 +81,43 @@ func buildConfig(filename string) (Config, error) {
 	var repos []Repo
 	for _, repo := range config.Repos {
 		split := strings.Split(repo, "/")
-		if len(split) != 2 {
-			return Config{}, fmt.Errorf("Incorrect repo format, should be `owner/name`, got %s\n", repo)
+		switch len(split) {
+		case 2:
+			repos = append(repos, Repo{
+				Host:  "github.com",
+				Owner: split[0],
+				Name:  split[1],
+			})
+		case 3:
+			repos = append(repos, Repo{
+				Host:  split[0],
+				Owner: split[1],
+				Name:  split[2],
+			})
+		default:
+			return Config{}, fmt.Errorf("Incorrect repo format, should be `owner/name` or `host/owner/name`, got %s", repo)
 		}
-		repos = append(repos, Repo{Owner: split[0], Name: split[1]})
+	}
+	githubTokens := make(map[string]string)
+	tokens := os.Getenv("GH_TOKEN")
+	if tokens != "" {
+		if strings.Contains(tokens, ":") {
+			hosts := strings.Split(tokens, ",")
+			for _, host := range hosts {
+				creds := strings.Split(host, ":")
+				if len(creds) != 2 {
+					return Config{}, fmt.Errorf("Could not parse host in GH_TOKEN, should be on the form hostname:token")
+				}
+				githubTokens[creds[0]] = creds[1]
+			}
+		} else {
+			githubTokens["github.com"] = tokens
+		}
 	}
 	return Config{
-		Repos:       repos,
-		Alerts:      AlertsConfig(config.Alerts),
-		GithubToken: os.Getenv("GH_TOKEN"),
+		Repos:        repos,
+		Alerts:       AlertsConfig(config.Alerts),
+		GithubTokens: githubTokens,
 	}, nil
 }
 
@@ -142,14 +171,14 @@ type Item struct {
 func main() {
 	config, err := buildConfig("config.json")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not parse config file: %s", err.Error())
+		fmt.Fprintf(os.Stderr, "Could not parse config file: %s\n", err.Error())
 		os.Exit(1)
 	}
 	state := newState()
-	state.addTab("PRs", getPrs(config.Repos, config.GithubToken))
-	state.addTab("Issues", getIssues(config.Repos, config.GithubToken))
+	state.addTab("PRs", getPrs(config.Repos, config.GithubTokens))
+	state.addTab("Issues", getIssues(config.Repos, config.GithubTokens))
 	state.addTab("Alerts", getAlerts(config.Alerts))
-	state.addTab("Workflows", getWorkflowRuns(config.Repos, config.GithubToken))
+	state.addTab("Workflows", getWorkflowRuns(config.Repos, config.GithubTokens))
 	go updateData(&state)
 
 	if os.Getenv("LOG") == "false" {
@@ -200,11 +229,11 @@ func updateData(state *State) {
 	time.Sleep(10 * time.Second)
 }
 
-func getPrs(repos []Repo, token string) func() ([]Item, error) {
+func getPrs(repos []Repo, tokens map[string]string) func() ([]Item, error) {
 	return func() ([]Item, error) {
 		var items []Item
 		for _, r := range repos {
-			prs, err := github.ListPRsForRepo(r.Owner, r.Name, token)
+			prs, err := github.ListPRsForRepo(r.Host, r.Owner, r.Name, tokens[r.Host])
 			if err != nil {
 				return []Item{}, fmt.Errorf("Failed to list PRs: %s", err.Error())
 			}
@@ -219,11 +248,11 @@ func getPrs(repos []Repo, token string) func() ([]Item, error) {
 	}
 }
 
-func getIssues(repos []Repo, token string) func() ([]Item, error) {
+func getIssues(repos []Repo, tokens map[string]string) func() ([]Item, error) {
 	return func() ([]Item, error) {
 		var items []Item
 		for _, r := range repos {
-			issues, err := github.ListIssuesForRepo(r.Owner, r.Name, token)
+			issues, err := github.ListIssuesForRepo(r.Host, r.Owner, r.Name, tokens[r.Host])
 			if err != nil {
 				return []Item{}, fmt.Errorf("Failed to list issues: %s", err.Error())
 			}
@@ -275,11 +304,11 @@ func getAlerts(alertsConfig AlertsConfig) func() ([]Item, error) {
 	}
 }
 
-func getWorkflowRuns(repos []Repo, token string) func() ([]Item, error) {
+func getWorkflowRuns(repos []Repo, tokens map[string]string) func() ([]Item, error) {
 	return func() ([]Item, error) {
 		var items []Item
 		for _, r := range repos {
-			runs, err := github.ListWorkflowRunsForRepo(r.Owner, r.Name, token)
+			runs, err := github.ListWorkflowRunsForRepo(r.Host, r.Owner, r.Name, tokens[r.Host])
 			if err != nil {
 				return []Item{}, fmt.Errorf("Failed to list workflow runs: %s", err.Error())
 			}
