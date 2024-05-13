@@ -13,6 +13,7 @@ type PR struct {
 	Title     string    `json:"title"`
 	HtmlURL   string    `json:"html_url"`
 	CreatedAt time.Time `json:"created_at"`
+	Draft     bool      `json:"draft"`
 }
 
 // Returns all open PRs for a repo, with the most recent PRs first
@@ -23,6 +24,12 @@ func ListPRsForRepo(host, owner, repo, token string) ([]PR, error) {
 	if err != nil {
 		return []PR{}, fmt.Errorf("Failed to list pull requests: %s", err.Error())
 	}
+
+	// Filter draft PRs
+	prs = slices.DeleteFunc(prs, func(pr PR) bool {
+		return pr.Draft
+	})
+
 	slices.SortFunc(prs, func(a, b PR) int {
 		return -1 * a.CreatedAt.Compare(b.CreatedAt)
 	})
