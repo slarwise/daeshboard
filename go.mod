@@ -1,4 +1,4 @@
-module gui
+module daeshboard
 
 go 1.22
 

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"gui/internal/github"
+	"daeshboard/internal/github"
 )
 
 var (
